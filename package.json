@@ -6,15 +6,27 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "seed-stimuli": "npx tsx scripts/seed-stimuli.ts",
+    "check:calibration": "npx tsx scripts/check-calibration-pipeline.ts",
+    "check:value-assignment": "npx tsx scripts/check-value-assignment.ts",
+    "check:formal-choice": "npx tsx scripts/check-formal-choice.ts",
+    "check:dots-stagegame": "npx tsx scripts/check-dots-stagegame.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.3",
+    "@supabase/supabase-js": "^2.105.4",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.10.0",
+    "jose": "^6.2.3",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
