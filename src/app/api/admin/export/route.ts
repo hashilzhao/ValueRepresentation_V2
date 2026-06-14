@@ -21,6 +21,12 @@ export async function GET(request: Request) {
     case "participant_summary":
       return exportCSV(db, "study1_participant_summary.csv", participantSummarySQL());
     case "stimulus_value_map":
+    case "calibration_responses":
+      return exportCSV(db, "study1_calibration_responses.csv", calibrationResponsesSQL());
+    case "stimulus_elo":
+      return exportCSV(db, "study1_stimulus_elo.csv", stimulusEloSQL());
+    case "calibration_stability":
+      return exportCSV(db, "study1_calibration_stability.csv", calibrationStabilitySQL());
       return exportCSV(db, "study1_stimulus_value_map.csv", stimulusValueMapSQL());
     case "data_dictionary":
       return dictionaryExport();
@@ -94,6 +100,14 @@ function participantSummarySQL() {
     cq.within_set_consistency, cq.cross_set_anchor_consistency,
     cq.cross_set_near_rank_consistency, cq.cross_set_same_rank_bias_flag,
     cq.timeout_rate AS calibration_timeout_rate, cq.mean_rt_ms AS calibration_mean_rt_ms,
+    cs.stability_grade,
+    cs.cycle_consistency_rate, cs.test_retest_agreement,
+    cs.cross_level_kendall_w, cs.elo_model_rmse,
+    (SELECT COUNT(*) FROM calibration_trials ct2 WHERE ct2.session_id=s.id) AS calibration_total_trials,
+    (SELECT COUNT(*) FROM calibration_responses cr3 WHERE cr3.session_id=s.id) AS calibration_total_responses,
+    (SELECT ROUND(AVG(se.elo_score),0) FROM stimulus_elo se WHERE se.session_id=s.id) AS avg_elo_score,
+    (SELECT ROUND(AVG(se.elo_volatility),0) FROM stimulus_elo se WHERE se.session_id=s.id) AS avg_elo_volatility,
+    (SELECT SUM(se.comparisons_count) FROM stimulus_elo se WHERE se.session_id=s.id) AS total_elo_comparisons,
     (SELECT CASE WHEN SUM(CASE WHEN correct=1 THEN 1 ELSE 0 END)>0 THEN 0 ELSE 1 END FROM value_comprehension_checks vcc WHERE vcc.session_id=s.id) AS value_comprehension_flag,
     pec.suspicion_flag,
     (SELECT ROUND(SUM(cr.timeout)*100.0/MAX(1,COUNT(*)),1) FROM choice_responses cr WHERE cr.session_id=s.id) AS formal_choice_timeout_rate,
@@ -111,6 +125,7 @@ function participantSummarySQL() {
   JOIN participants p ON p.id = s.participant_id
   LEFT JOIN manipulation_check_summary mcs ON mcs.session_id = s.id
   LEFT JOIN calibration_quality cq ON cq.session_id = s.id
+      LEFT JOIN calibration_stability cs ON cs.session_id = s.id
   LEFT JOIN post_experiment_checks pec ON pec.session_id = s.id
   WHERE s.status = 'completed'
   ORDER BY p.participant_code`;
@@ -170,4 +185,56 @@ function stimulusValueMapSQL() {
   JOIN participants p ON p.id = svm.participant_id
   LEFT JOIN stimulus_elo se ON se.session_id = svm.session_id AND se.stim_id = svm.stim_id
   ORDER BY p.participant_code, svm.set_id, svm.final_liking_rank`;
+}
+
+function calibrationResponsesSQL() {
+  return `SELECT p.participant_code, cr.session_id, s.group_label AS "group",
+    cr.trial_id, ct.phase, ct.trial_index,
+    ct.left_stim_id, ct.right_stim_id,
+    ct.left_set_id, ct.right_set_id,
+    ct.left_preliminary_rank, ct.right_preliminary_rank,
+    ct.expected_choice, ct.boundary_type,
+    cr.response_side, cr.chosen_stim_id,
+    cr.consistent, cr.rt_ms, cr.timeout, cr.response_method,
+    cr.created_at
+  FROM calibration_responses cr
+  JOIN calibration_trials ct ON ct.id = cr.trial_id
+  JOIN experiment_sessions s ON s.id = cr.session_id
+  JOIN participants p ON p.id = cr.participant_id
+  ORDER BY p.participant_code, s.id, ct.trial_index`;
+}
+
+function stimulusEloSQL() {
+  return `SELECT p.participant_code, se.session_id, s.group_label AS "group",
+    se.set_id, se.stim_id,
+    se.elo_score, se.elo_volatility, se.comparisons_count,
+    se.calibration_attempt_index,
+    cso.original_liking_rank, cso.calibrated_liking_rank,
+    cso.shift_direction, cso.shift_rate, cso.shift_confidence,
+    wss.original_within_rank, wss.final_stable_rank,
+    wss.adjacent_retest_result, wss.adjacent_consistency, wss.ambiguity_flag
+  FROM stimulus_elo se
+  JOIN experiment_sessions s ON s.id = se.session_id
+  JOIN participants p ON p.id = se.participant_id
+  LEFT JOIN cross_set_orthogonalized cso
+    ON cso.session_id = se.session_id
+    AND cso.stim_id = se.stim_id
+    AND cso.calibration_attempt_index = se.calibration_attempt_index
+  LEFT JOIN within_set_stable wss
+    ON wss.session_id = se.session_id
+    AND wss.stim_id = se.stim_id
+    AND wss.calibration_attempt_index = se.calibration_attempt_index
+  ORDER BY p.participant_code, se.set_id, se.elo_score DESC`;
+}
+
+function calibrationStabilitySQL() {
+  return `SELECT p.participant_code, cs.session_id, s.group_label AS "group",
+    cs.cycle_consistency_rate, cs.test_retest_agreement,
+    cs.cross_level_kendall_w, cs.elo_model_rmse, cs.timeout_rate,
+    cs.stability_grade, cs.low_confidence_sets,
+    cs.adaptive_supplement_count, cs.calibration_attempt_index
+  FROM calibration_stability cs
+  JOIN experiment_sessions s ON s.id = cs.session_id
+  JOIN participants p ON p.id = cs.participant_id
+  ORDER BY p.participant_code, cs.calibration_attempt_index`;
 }

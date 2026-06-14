@@ -1,14 +1,27 @@
 import { NextResponse } from "next/server";
 import { saveStageGameResponse } from "@/lib/stage-game/response";
 import { getDb } from "@/lib/db";
-import { SM_CORRECT_POINTS, SM_INCORRECT_POINTS } from "@/lib/stage-game/config";
+import { computeDotComparisonFeedback } from "@/lib/stage-game/trial-generator";
+import {
+  SM_CORRECT_POINTS,
+  SM_INCORRECT_POINTS,
+  TOTAL_TRIALS,
+  RESOURCE_TASK_CONFIG,
+} from "@/lib/stage-game/config";
+import type { Group } from "@/lib/stages";
 
 /**
  * POST /api/stage-game/submit-response
  * Save one trial response.
  *
- * For dot_comparison (is_manipulated_feedback=1): uses the pre-computed adaptive feedback from the trial.
- * For shape_matching and real dot_comparison (is_manipulated_feedback=0): uses true accuracy-based feedback.
+ * For dot_comparison (is_manipulated_feedback=1): computes manipulated feedback
+ *   ADAPTIVELY at response time based on the CURRENT balance.  This ensures the
+ *   balance stays within the designed range (scarcity 4–12 / abundance 100–130)
+ *   regardless of timeouts or other deviations — balance control is the highest
+ *   priority.
+ *
+ * For shape_matching and real dot_comparison (is_manipulated_feedback=0):
+ *   uses true accuracy-based feedback.
  */
 export async function POST(request: Request) {
   const body = await request.json();
@@ -31,14 +44,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Trial not found." }, { status: 404 });
   }
 
-  // Read current balance from server DB — never trust the client.
+  // Read current balance AND group from server DB — never trust the client.
   const session = db
-    .prepare("SELECT resource_balance FROM experiment_sessions WHERE id = ?")
-    .get(body.session_id) as { resource_balance: number } | undefined;
+    .prepare("SELECT resource_balance, group_label FROM experiment_sessions WHERE id = ?")
+    .get(body.session_id) as { resource_balance: number; group_label: string } | undefined;
 
   const balanceBefore = session?.resource_balance ?? 0;
+  const group = (session?.group_label ?? "scarcity") as Group;
+  const config = RESOURCE_TASK_CONFIG[group];
   const taskType: string = body.task_type;
   const isMissedOrTimeout = body.missed_response || body.timeout;
+  const trialIndex: number = body.global_trial_index ?? 0;
 
   let feedbackMode: "true" | "manipulated";
   let feedbackDirection: "gain" | "loss";
@@ -59,17 +75,25 @@ export async function POST(request: Request) {
       feedbackPoints = taskType === "shape_matching" ? SM_INCORRECT_POINTS : 2;
     }
   } else {
-    // ── Manipulated (preset adaptive) feedback ────────────────
+    // ── Manipulated feedback — computed ADAPTIVELY at response time ─
+    // Priority: keep balance within designed range at all times.
+    // Uses the CURRENT balance (not pre-computed presets) to compensate
+    // for timeouts, refreshes, or any balance drift.
     feedbackMode = "manipulated";
 
     if (isMissedOrTimeout) {
-      // Timeout/miss: override with penalty.
       feedbackDirection = "loss";
       feedbackPoints = 2;
     } else {
-      // Use the pre-computed preset feedback stored on the trial.
-      feedbackDirection = (trial.preset_feedback_direction ?? "gain") as "gain" | "loss";
-      feedbackPoints = trial.preset_feedback_points ?? 1;
+      const adaptive = computeDotComparisonFeedback(
+        group,
+        balanceBefore,
+        config,
+        trialIndex,
+        TOTAL_TRIALS,
+      );
+      feedbackDirection = adaptive.direction;
+      feedbackPoints = adaptive.points;
     }
   }
 

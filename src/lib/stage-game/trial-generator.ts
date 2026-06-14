@@ -114,6 +114,8 @@ export function generateDotComparisonFeedback(
       group,
       balance,
       config,
+      i,           // trialIndex
+      TOTAL_TRIALS,
     );
 
     if (direction === "gain") balance += points;
@@ -130,22 +132,17 @@ export function generateDotComparisonFeedback(
 }
 
 // ─── Adaptive feedback for dot_comparison ──────────────────────
+// ─── HIGHEST PRIORITY: balance range targets ──────────────────
+//
+// Scarcity (target: 4–12, ≥75% trials < 10, final balance exactly 10):
+//   - Aggressively push below 10 early, keep oscillating 4–9
+//   - Converge to exactly 10 in the final stretch (last ~5 trials)
+//
+// Abundance (target: 90–130, ≥75% trials > 110, last 10% > 110):
+//   - Ramp up above 110 early, keep elevated 105–130
+//   - Ensure last 10% of trials all above 110
+//
 
-/**
- * Compute manipulated feedback for a dot_comparison trial.
- * Rules differ by group to create the intended resource experience.
- *
- * Scarcity (target: 4–12, often < 10):
- *   balance > 10  → bias toward loss (pull below threshold)
- *   balance 7–10  → mild fluctuation, bias toward tension
- *   balance 4–6   → mixed gain/loss, maintain tension
- *   balance < 4   → provide gains to avoid collapse
- *
- * Abundance (target: 100–130, always well above 10):
- *   balance < 100  → prioritize gain
- *   balance 100–130 → mixed, slight gain bias
- *   balance > 130  → mild loss to avoid runaway inflation
- */
 export function computeDotComparisonFeedback(
   group: Group,
   balanceBefore: number,
@@ -153,37 +150,101 @@ export function computeDotComparisonFeedback(
   trialIndex?: number,
   totalTrials?: number,
 ): { direction: FeedbackDirection; points: number } {
+  const idx = trialIndex ?? 0;
+  const total = totalTrials ?? 90;
+  const remaining = total - idx;
+
   if (group === "scarcity") {
-    return computeScarcityFeedback(balanceBefore);
+    return computeScarcityFeedback(balanceBefore, idx, total, remaining);
   }
-  return computeAbundanceFeedback(balanceBefore, trialIndex ?? 0, totalTrials ?? 90);
+  return computeAbundanceFeedback(balanceBefore, idx, total, remaining);
 }
 
 function computeScarcityFeedback(
   balance: number,
+  trialIndex: number,
+  totalTrials: number,
+  remaining: number,
 ): { direction: FeedbackDirection; points: number } {
   const roll = Math.random();
 
-  if (balance > 10) {
-    // Pull below threshold. Strong bias toward loss.
-    if (roll < 0.85) return { direction: "loss", points: randInt(1, 3) };
-    return { direction: "gain", points: 1 };
+  // ── Emergency bounds ──────────────────────────────────────────
+  if (balance > 18) return { direction: "loss", points: 4 };
+  if (balance > 15) return { direction: "loss", points: randInt(3, 4) };
+  if (balance < 1)  return { direction: "gain", points: 4 };
+  if (balance < 3)  return { direction: "gain", points: randInt(3, 4) };
+
+  // ═══════════════════════════════════════════════════════════════
+  // HIGHEST PRIORITY: final convergence to [10, 12] (last 12 trials)
+  // ═══════════════════════════════════════════════════════════════
+  if (remaining <= 12) {
+    // Target = 11 (center of acceptable range [10,12])
+    const target = 11;
+    const gap = target - balance;
+    const absGap = Math.abs(gap);
+
+    if (absGap === 0) {
+      // At 11 — hold steady, bias slightly down to offset real-trial gains
+      if (roll < 0.55) return { direction: "loss", points: 1 };
+      return { direction: "gain", points: 1 };
+    }
+
+    // ~55% of remaining trials are manipulated
+    const remainingManip = Math.max(1, Math.round(remaining * 0.55));
+    const perTrial = Math.min(4, Math.max(1, Math.round(absGap / remainingManip)));
+
+    // Extra margin: if far from target, use larger adjustment
+    const finalPts = absGap > 5 ? Math.min(4, perTrial + 1) : perTrial;
+
+    if (gap > 0) return { direction: "gain", points: finalPts };
+    return { direction: "loss", points: finalPts };
   }
 
-  if (balance >= 7 && balance <= 10) {
-    // Mild fluctuation, bias toward tension.
-    if (roll < 0.60) return { direction: "loss", points: randInt(1, 2) };
+  // ═══════════════════════════════════════════════════════════════
+  // HIGHEST PRIORITY: guarantee ≥75% trials below 10
+  // ═══════════════════════════════════════════════════════════════
+  // Rule: whenever balance ≥ 10, ALWAYS push below immediately.
+  // This ensures balance only briefly touches 10+ → ≥75% below 10.
+
+  if (balance >= 10) {
+    // Always loss when at/above 10 — no exceptions during main phase
+    // Points: enough to push at least to 9 (i.e., below the threshold)
+    const needed = balance - 8; // push to ~8 for margin
+    return { direction: "loss", points: Math.min(4, Math.max(1, needed)) };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Below 10 — control oscillation, prevent too-fast rise
+  // ═══════════════════════════════════════════════════════════════
+
+  // Pre-convergence zone (last 13-20 trials): steer toward 10-12
+  if (remaining <= 20) {
+    if (balance < 8) {
+      if (roll < 0.75) return { direction: "gain", points: randInt(1, 2) };
+      return { direction: "loss", points: 1 };
+    }
+    if (balance === 8 || balance === 9) {
+      // Near 10 — cautious drift upward
+      if (roll < 0.55) return { direction: "gain", points: 1 };
+      return { direction: "loss", points: 1 };
+    }
+  }
+
+  // Main oscillation zone (balance 3-9)
+  if (balance >= 7 && balance <= 9) {
+    // Upper zone — keep downward pressure so balance doesn't hit 10 often
+    if (roll < 0.80) return { direction: "loss", points: randInt(1, 2) };
     return { direction: "gain", points: randInt(1, 2) };
   }
 
   if (balance >= 4 && balance <= 6) {
-    // Mixed, maintain tension without collapse.
+    // Sweet spot — oscillate evenly
     if (roll < 0.50) return { direction: "gain", points: randInt(1, 2) };
     return { direction: "loss", points: randInt(1, 2) };
   }
 
-  // balance < 4 — prevent collapse.
-  if (roll < 0.80) return { direction: "gain", points: randInt(1, 3) };
+  // balance 3 — prevent collapse
+  if (roll < 0.85) return { direction: "gain", points: randInt(1, 4) };
   return { direction: "loss", points: 1 };
 }
 
@@ -191,104 +252,106 @@ function computeAbundanceFeedback(
   balance: number,
   trialIndex: number,
   totalTrials: number,
+  remaining: number,
 ): { direction: FeedbackDirection; points: number } {
   const roll = Math.random();
-  const remaining = totalTrials - trialIndex;
+  // Last 10% of trials = last 9 trials
+  const isLast10Pct = remaining <= Math.ceil(totalTrials * 0.10);
 
-  // ── Final phase (≤5 remaining): guarantee finish ≥110 ──────
-  if (remaining <= 5) {
-    if (balance < 110) {
-      // Must gain to reach 110+. Stronger gain if further below.
-      if (balance < 105) return { direction: "gain", points: randInt(2, 3) };
-      return { direction: "gain", points: randInt(1, 2) };
-    }
-    if (balance > 130) {
-      // Mild loss only, don't push below 110.
-      if (roll < 0.50) return { direction: "loss", points: 1 };
-      return { direction: "gain", points: 1 };
-    }
-    // 110–130: maintain with slight gain bias.
-    if (roll < 0.55) return { direction: "gain", points: 1 };
-    return { direction: "loss", points: 1 };
-  }
-
-  // ── Late phase (≤20 remaining): keep 110–128 ───────────────
-  if (remaining <= 20) {
+  // ── Final 10%: must stay above 110 ──────────────────────────
+  if (isLast10Pct) {
     if (balance < 105) {
+      // Urgent recovery — strong gain.
+      return { direction: "gain", points: randInt(2, 3) };
+    }
+    if (balance < 110) {
       if (roll < 0.85) return { direction: "gain", points: randInt(1, 3) };
       return { direction: "gain", points: 1 };
     }
-    if (balance < 110) {
-      if (roll < 0.70) return { direction: "gain", points: randInt(1, 2) };
-      return { direction: "loss", points: 1 };
-    }
     if (balance >= 110 && balance <= 125) {
-      // Stable — mild fluctuation with slight downward bias near upper.
-      if (balance > 122) {
-        if (roll < 0.40) return { direction: "gain", points: 1 };
-        if (roll < 0.82) return { direction: "loss", points: 1 };
-        return { direction: "loss", points: randInt(1, 2) };
-      }
-      if (roll < 0.48) return { direction: "gain", points: 1 };
-      if (roll < 0.85) return { direction: "loss", points: 1 };
+      // Good zone — mild fluctuation, slight gain bias to stay above 110.
+      if (roll < 0.50) return { direction: "gain", points: 1 };
+      if (roll < 0.80) return { direction: "loss", points: 1 };
       return { direction: "gain", points: randInt(1, 2) };
     }
-    // > 125 — stronger downward pull in late phase.
-    if (roll < 0.25) return { direction: "gain", points: 1 };
-    if (roll < 0.80) return { direction: "loss", points: randInt(1, 2) };
-    return { direction: "loss", points: randInt(1, 3) };
+    // 125+ — mild downward pull but don't risk going below 110.
+    if (balance > 130) {
+      if (roll < 0.70) return { direction: "loss", points: randInt(1, 2) };
+      return { direction: "gain", points: 1 };
+    }
+    if (roll < 0.40) return { direction: "gain", points: 1 };
+    if (roll < 0.75) return { direction: "loss", points: 1 };
+    return { direction: "loss", points: randInt(1, 2) };
   }
 
-  // ── Early phase (< 30 trials): ramp from 100 toward 110+ ──
-  if (trialIndex < 30) {
+  // ── Early phase (first 25 trials): ramp above 110 ───────────
+  if (trialIndex < 25) {
     if (balance < 95) {
-      // Fell below start — recover.
+      // Fell below start — urgent recovery.
       return { direction: "gain", points: randInt(2, 4) };
     }
-    if (balance < 100) {
+    if (balance < 105) {
+      // Push toward 110+.
       if (roll < 0.80) return { direction: "gain", points: randInt(1, 3) };
       return { direction: "gain", points: 1 };
     }
-    if (balance >= 100 && balance <= 110) {
-      // Gradual climb with slight gain bias.
-      if (roll < 0.60) return { direction: "gain", points: randInt(1, 2) };
-      if (roll < 0.85) return { direction: "loss", points: 1 };
+    if (balance >= 105 && balance <= 115) {
+      // Climbing well — gain bias to push above 110.
+      if (roll < 0.55) return { direction: "gain", points: randInt(1, 2) };
+      if (roll < 0.80) return { direction: "loss", points: 1 };
       return { direction: "gain", points: 1 };
     }
-    if (balance > 118) {
+    if (balance > 120) {
       // Climbing too fast — mild pull back.
-      if (roll < 0.60) return { direction: "loss", points: randInt(1, 2) };
+      if (roll < 0.55) return { direction: "loss", points: randInt(1, 2) };
       return { direction: "gain", points: 1 };
     }
-    // 110–118: good, maintain.
-    if (roll < 0.50) return { direction: "gain", points: 1 };
-    if (roll < 0.85) return { direction: "loss", points: 1 };
+    // 115–120: good, maintain with slight gain.
+    if (roll < 0.45) return { direction: "gain", points: 1 };
+    if (roll < 0.80) return { direction: "loss", points: 1 };
     return { direction: "gain", points: randInt(1, 2) };
   }
 
-  // ── Middle phase: 105–130 ───────────────────────────────────
+  // ── Main phase: keep 90–130, bias above 110 ────────────────
+
+  if (balance < 90) {
+    // Below range — urgent gain.
+    return { direction: "gain", points: randInt(2, 4) };
+  }
+
   if (balance < 100) {
-    if (roll < 0.80) return { direction: "gain", points: randInt(2, 4) };
+    // Below 100 — strong gain bias to push up.
+    if (roll < 0.75) return { direction: "gain", points: randInt(1, 3) };
     return { direction: "gain", points: 1 };
   }
-  if (balance < 105) {
-    if (roll < 0.70) return { direction: "gain", points: randInt(1, 2) };
+
+  if (balance >= 100 && balance <= 109) {
+    // Near 110 — strong gain bias to push above.
+    if (roll < 0.75) return { direction: "gain", points: randInt(1, 2) };
     return { direction: "loss", points: 1 };
   }
-  if (balance >= 105 && balance <= 120) {
-    // Stable zone — mild fluctuation, slight gain bias.
-    if (roll < 0.45) return { direction: "gain", points: 1 };
-    if (roll < 0.85) return { direction: "loss", points: 1 };
+
+  if (balance >= 110 && balance <= 120) {
+    // Sweet spot above 110 — mild oscillation with slight gain bias.
+    if (roll < 0.48) return { direction: "gain", points: 1 };
+    if (roll < 0.82) return { direction: "loss", points: 1 };
     return { direction: "gain", points: randInt(1, 2) };
   }
+
   if (balance > 120 && balance <= 128) {
-    // Upper-mid — slight downward bias to prevent drift toward 130+.
+    // Upper zone — mild downward bias.
     if (roll < 0.35) return { direction: "gain", points: 1 };
-    if (roll < 0.80) return { direction: "loss", points: 1 };
+    if (roll < 0.78) return { direction: "loss", points: 1 };
     return { direction: "loss", points: randInt(1, 2) };
   }
-  // > 128 — stronger downward pull.
-  if (roll < 0.25) return { direction: "gain", points: 1 };
+
+  // > 128 — pull back toward 110-120 range.
+  if (balance > 135) {
+    // Way above — stronger correction.
+    if (roll < 0.80) return { direction: "loss", points: randInt(2, 3) };
+    return { direction: "loss", points: 1 };
+  }
+  if (roll < 0.30) return { direction: "gain", points: 1 };
   if (roll < 0.80) return { direction: "loss", points: randInt(1, 2) };
   return { direction: "loss", points: randInt(1, 3) };
 }

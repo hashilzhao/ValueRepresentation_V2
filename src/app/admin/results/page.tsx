@@ -199,6 +199,24 @@ export default function ResultsPage() {
         >
           Export stimulus_value_map.csv
         </a>
+        <a
+          href="/api/admin/export?type=calibration_responses"
+          className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+        >
+          Export calibration_responses.csv
+        </a>
+        <a
+          href="/api/admin/export?type=stimulus_elo"
+          className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+        >
+          Export stimulus_elo.csv
+        </a>
+        <a
+          href="/api/admin/export?type=calibration_stability"
+          className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+        >
+          Export calibration_stability.csv
+        </a>
       </div>
 
       {/* Completion overview */}

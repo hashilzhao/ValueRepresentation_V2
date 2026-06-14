@@ -80,7 +80,7 @@ function initSchema(db: Database.Database) {
       task_type TEXT NOT NULL,
       stimulus_payload TEXT,
       correct_answer TEXT NOT NULL,
-      preset_feedback_direction TEXT NOT NULL CHECK (preset_feedback_direction IN ('gain', 'loss')),
+      preset_feedback_direction TEXT NOT NULL CHECK (preset_feedback_direction IN ('gain','loss','none')),
       preset_feedback_points INTEGER NOT NULL,
       planned_balance_after INTEGER NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
