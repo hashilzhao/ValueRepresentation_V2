@@ -147,7 +147,7 @@ export default function PracticeTrials({ onComplete }: Props) {
       <div className="text-center space-y-6">
         <h2 className="text-3xl font-bold text-gray-900">练习已完成</h2>
         <p className="text-xl text-gray-700">
-          练习已完成。接下来将进入正式任务信息页面。
+          练习已完成。接下来将进入正式的资源账户任务。
         </p>
         <button
           onClick={onComplete}

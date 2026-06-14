@@ -526,12 +526,29 @@ export default async function ExperimentPage({
 /** Return stage-specific content. Never exposes internal labels to participants. */
 function getStageContent(stage: Stage, group: Group) {
   switch (stage) {
-    case "relative_resource_feedback":
+    case "relative_resource_feedback": {
+      // Split text into paragraphs, render threshold warning in bold red.
+      const paragraphs = FEEDBACK_TEXT[group].split("\n\n");
       return (
-        <>
-          <p>{FEEDBACK_TEXT[group]}</p>
-        </>
+        <div className="space-y-4 text-xl leading-relaxed text-gray-800">
+          {paragraphs.map((para, i) => {
+            const isWarning = para.includes("账户余额需要达到");
+            return (
+              <p
+                key={i}
+                className={
+                  isWarning
+                    ? "font-extrabold text-red-600 bg-red-50 rounded-lg px-4 py-3 border-2 border-red-300"
+                    : ""
+                }
+              >
+                {para}
+              </p>
+            );
+          })}
+        </div>
       );
+    }
 
     default:
       return null;
