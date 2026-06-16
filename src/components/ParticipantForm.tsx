@@ -29,8 +29,8 @@ export default function ParticipantForm() {
       return;
     }
 
-    if (!/^[A-Za-z0-9_-]+$/.test(participant_code)) {
-      setError("被试编号只能包含字母、数字、下划线和短横线。");
+    if (!/^P\d+$/i.test(participant_code)) {
+      setError("被试编号格式应为 P+数字（如 P001）。");
       setLoading(false);
       return;
     }

@@ -30,10 +30,10 @@ export const RESOURCE_TASK_CONFIG: Record<Group, ResourceTaskConfig> = {
     balance_max: 12,
   },
   abundance: {
-    initial_balance: 100,
+    initial_balance: 10,
     pass_threshold: 10,
-    balance_min: 80,
-    balance_max: 135,
+    balance_min: 8,
+    balance_max: 40,
   },
 };
 

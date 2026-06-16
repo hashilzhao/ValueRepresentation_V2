@@ -11,21 +11,14 @@ const ACCESS_SECRET = new TextEncoder().encode(
   process.env.PARTICIPANT_ACCESS_SECRET || "study1-participant-access-secret",
 );
 
-/** Balanced assignment: return the group with fewer active sessions. */
-function assignGroup(db: ReturnType<typeof getDb>): Group {
-  const row = db
-    .prepare(
-      `SELECT group_label, COUNT(*) as cnt
-       FROM experiment_sessions
-       WHERE status = 'in_progress'
-       GROUP BY group_label`,
-    )
-    .all() as { group_label: Group; cnt: number }[];
-
-  const scarcity = row.find((r) => r.group_label === "scarcity")?.cnt ?? 0;
-  const abundance = row.find((r) => r.group_label === "abundance")?.cnt ?? 0;
-
-  return scarcity <= abundance ? "scarcity" : "abundance";
+/** Deterministic group assignment based on participant code.
+ *  Codes must start with "P" followed by digits (e.g., P001, P002).
+ *  Odd number → scarcity, even number → abundance. */
+function assignGroup(participantCode: string): Group {
+  const match = participantCode.match(/^P(\d+)$/i);
+  if (!match) throw new Error("Invalid participant code format");
+  const num = parseInt(match[1], 10);
+  return num % 2 === 1 ? "scarcity" : "abundance";
 }
 
 export async function POST(request: Request) {
@@ -56,9 +49,9 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!/^[A-Za-z0-9_-]+$/.test(participant_code)) {
+  if (!/^P\d+$/i.test(participant_code)) {
     return NextResponse.json(
-      { error: "被试编号只能包含字母、数字、下划线和短横线。" },
+      { error: "被试编号格式无效。请使用 P+数字 格式（如 P001）。" },
       { status: 400 },
     );
   }
@@ -94,7 +87,7 @@ export async function POST(request: Request) {
   const participantId = crypto.randomUUID();
   const sessionId = crypto.randomUUID();
   const now = new Date().toISOString();
-  const group = assignGroup(db);
+  const group = assignGroup(participant_code);
   const initialStage = STAGES[0]; // baseline_questionnaire
 
   const insertParticipant = db.prepare(`
